@@ -1,0 +1,38 @@
+# Core LLM & Orchestration
+google-generativeai>=0.7.0
+langchain-google-genai>=1.0.0
+langgraph>=0.2.0
+langchain>=0.2.0
+langchain-community>=0.2.0
+
+# Financial Data
+yfinance>=0.2.40
+pandas>=2.0.0
+numpy>=1.26.0
+
+# Visualization & Charts
+matplotlib>=3.8.0
+plotly>=5.18.0
+seaborn>=0.13.0
+
+# PDF Generation
+fpdf2>=2.7.9
+Pillow>=10.0.0
+
+# Web / News / Sentiment
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+feedparser>=6.0.10
+textblob>=0.17.1
+vaderSentiment>=3.3.2
+
+# Streamlit UI
+streamlit>=1.35.0
+streamlit-extras>=0.4.0
+plotly>=5.18.0
+
+# Utilities
+python-dotenv>=1.0.0
+pydantic>=2.5.0
+tenacity>=8.2.0
+loguru>=0.7.2
