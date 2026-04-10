@@ -18,7 +18,7 @@ CHART_DIR.mkdir(parents=True, exist_ok=True)
 
 # ─── Gemini ───────────────────────────────────────────────────────────────────
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-pro")
+GEMINI_MODEL = "gemini-1.5-flash"  # Use stable 1.5-flash (2.0-flash often has 0 quota for new keys)
 GEMINI_TEMPERATURE = float(os.getenv("GEMINI_TEMPERATURE", "0.2"))
 
 # ─── Agent behaviour ──────────────────────────────────────────────────────────

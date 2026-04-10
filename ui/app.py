@@ -119,13 +119,10 @@ with st.sidebar:
     st.markdown("*Powered by Gemini + LangGraph*")
     st.markdown("---")
 
-    api_key_input = st.text_input(
-        "Gemini API Key",
-        value=GEMINI_API_KEY,
-        type="password",
-        help="Get yours at https://aistudio.google.com/app/apikey",
-    )
-
+    if not GEMINI_API_KEY:
+        st.error("🔑 **Gemini API Key missing**")
+        st.info("Please set `GEMINI_API_KEY` in your `.env` file or environment to enable analysis.")
+    
     st.markdown("### 🔎 Analysis Parameters")
     ticker = st.text_input("Stock Ticker", value="AAPL", placeholder="e.g. TSLA, MSFT, NVDA").upper().strip()
     company_name = st.text_input("Company Name (optional)", placeholder="Auto-detected")
@@ -137,7 +134,13 @@ with st.sidebar:
         end_date = st.date_input("End Date", value=date.today())
 
     st.markdown("---")
-    run_btn = st.button("🚀 Run Analysis", type="primary", use_container_width=True)
+    # Disable button if API key is missing
+    run_btn = st.button(
+        "🚀 Run Analysis", 
+        type="primary", 
+        use_container_width=True,
+        disabled=not GEMINI_API_KEY
+    )
 
     st.markdown("---")
     st.markdown("""
@@ -187,15 +190,6 @@ if not run_btn:
 
 # ─── Run Analysis ─────────────────────────────────────────────────────────────
 if run_btn:
-    if not api_key_input:
-        st.error("⚠️ Please enter your Gemini API key in the sidebar.")
-        st.stop()
-
-    # Inject API key at runtime
-    os.environ["GEMINI_API_KEY"] = api_key_input
-    import google.generativeai as genai
-    genai.configure(api_key=api_key_input)
-
     from graph.workflow import run_analysis
 
     # Live agent log container

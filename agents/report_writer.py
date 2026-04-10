@@ -52,13 +52,26 @@ def _call_gemini(prompt: str, schema: Any = None) -> str:
             config_args["response_mime_type"] = "application/json"
             config_args["response_schema"] = schema
 
-        response = client.models.generate_content(
-            model=GEMINI_MODEL,
-            contents=prompt,
-            config=types.GenerateContentConfig(**config_args)
-        )
+        try:
+            response = client.models.generate_content(
+                model=GEMINI_MODEL,
+                contents=prompt,
+                config=types.GenerateContentConfig(**config_args)
+            )
+        except Exception as e:
+            err_str = str(e).upper()
+            # Fallback for 404 (Not Found) or 429 (Resource Exhausted / Quota)
+            if ("NOT_FOUND" in err_str or "RESOURCE_EXHAUSTED" in err_str) and GEMINI_MODEL != "gemini-1.5-flash":
+                logger.warning(f"Model {GEMINI_MODEL} failed (Quota/Missing). Falling back to gemini-1.5-flash.")
+                response = client.models.generate_content(
+                    model="gemini-1.5-flash",
+                    contents=prompt,
+                    config=types.GenerateContentConfig(**config_args)
+                )
+            else:
+                raise e
+
         if not response or not response.text:
-            logger.error(f"Gemini returned empty response for prompt: {prompt[:50]}...")
             return ""
         return response.text.strip()
     except Exception as e:
@@ -151,10 +164,13 @@ Market Research Section:
             f"- {k['metric']}: {k['value']} → {k['signal']}"
             for k in analysis_data.get("kpi_table", [])[:15]
         )
+        # Financials (latest year)
+        currency = stock_data.get("currency", "USD")
+        financials = stock_data.get("financials", {})
         analysis_prompt = f"""
-You are a quantitative financial analyst. Write a professional data analysis section (200-250 words).
+You are a quantitative financial analyst. Write a professional data analysis section (200-250 words) for {company_name} ({ticker}).
+The currency for all values is {currency}.
 
-Company: {company_name} ({ticker})
 Price Trend: {analysis_data.get('price_trend','N/A')}
 Volatility: {analysis_data.get('volatility_level','N/A')}
 Fundamental Score: {analysis_data.get('fundamental_score', 0)}/100
@@ -162,14 +178,14 @@ Fundamental Score: {analysis_data.get('fundamental_score', 0)}/100
 KPI Signals:
 {kpi_text}
 
-Financials (latest year):
-- Revenue: ${stock_data.get('financials',{}).get('revenue',0)/1e9:.2f}B
-- Net Income: ${stock_data.get('financials',{}).get('net_income',0)/1e9:.2f}B
-- Free Cash Flow: ${stock_data.get('financials',{}).get('free_cf',0)/1e9:.2f}B
+Financials (latest year in {currency}):
+- Revenue: {financials.get('revenue',0)/1e9:.2f}B
+- Net Income: {financials.get('net_income',0)/1e9:.2f}B
+- Free Cash Flow: {financials.get('free_cf',0)/1e9:.2f}B
 
 Requirements:
 - Interpret the KPIs with professional context
-- Comment on valuation, growth, and financial health
+- Comment on valuation, growth, and financial health in the context of {currency}
 - Reference technical trend and volatility
 - Use financial terminology appropriately
 
@@ -201,19 +217,17 @@ Data Analysis Section:
         rec_prompt = f"""
 You are a senior investment analyst. Provide a clear, justified investment recommendation.
 Base your recommendation on the fundamental score, price trend, and news sentiment provided.
+All financial values are in {stock_data.get('currency', 'USD')}.
 
 Company: {company_name} ({ticker})
-Current Price: ${stock_data.get('current_price','N/A')}
-52-Week Range: ${stock_data.get('fifty_two_week_low','N/A')} - ${stock_data.get('fifty_two_week_high','N/A')}
+Current Price: {stock_data.get('current_price','N/A')}
+52-Week Range: {stock_data.get('fifty_two_week_low','N/A')} - {stock_data.get('fifty_two_week_high','N/A')}
 Fundamental Score: {analysis_data.get('fundamental_score',0)}/100
 Price Trend: {analysis_data.get('price_trend','N/A')}
 Sentiment: {news_data.get('sentiment_label','N/A')}
 Executive Summary: {report_data.get('executive_summary','')[:500]}
 """
         rec_text = _call_gemini(rec_prompt, schema=rec_schema)
-        # Debug: Log raw response to UI (temporary)
-        msgs = _log({**state, "messages": msgs}, f"DEBUG: Raw Rec Response: {rec_text[:200]}...")
-        
         rec_json = json.loads(rec_text)
 
         report_data["recommendation"]   = rec_json.get("recommendation", "HOLD")
@@ -228,19 +242,13 @@ Executive Summary: {report_data.get('executive_summary','')[:500]}
                     f"(Confidence: {report_data['confidence_score']:.0f}%) | "
                     f"Target: ${report_data.get('target_price','N/A')}")
     except Exception as e:
-        import traceback
-        log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "gemini_error.log")
-        with open(log_path, "a") as f:
-            f.write(f"\n--- {datetime.now()} ---\n")
-            f.write(traceback.format_exc())
-            f.write(f"Raw Result Attempted: {locals().get('rec_text', 'N/A')}\n")
-        logger.error(f"Gemini recommendation error: {e}. Check {log_path} for details.")
+        logger.error(f"Gemini recommendation error: {e}")
         report_data["recommendation"] = "HOLD"
         report_data["confidence_score"] = 50.0
         report_data["risk_factors"] = ["Data limitations", "Market uncertainty"]
         report_data["catalysts"] = ["Earnings beat", "Sector tailwinds"]
         errors.append(f"Gemini recommendation error: {e}")
-        msgs = _log({**state, "messages": msgs}, f"⚠️ Default recommendation used (Gemini error: {str(e)[:100]}).", "error")
+        msgs = _log({**state, "messages": msgs}, f"⚠️ Default recommendation used (Gemini error).", "error")
 
     msgs = _log({**state, "messages": msgs},
                 "🏁 Report writing complete. Generating PDF…", "done")
@@ -250,17 +258,18 @@ Executive Summary: {report_data.get('executive_summary','')[:500]}
         "report_data": report_data,
         "messages": msgs,
         "errors": errors,
-        "current_agent": "pdf_generator",
+        "completed": True,
     }
 
 
 def _build_context(ticker, company_name, stock_data, news_data, analysis_data) -> str:
+    currency = stock_data.get('currency', 'USD')
     return f"""
 Company: {company_name} ({ticker})
 Sector: {stock_data.get('sector', 'N/A')} | Industry: {stock_data.get('industry','N/A')}
-Current Price: ${stock_data.get('current_price', 'N/A')} ({stock_data.get('price_change_pct', 0):+.2f}% today)
-Market Cap: ${(stock_data.get('market_cap') or 0)/1e9:.2f}B
-52-Week Range: ${stock_data.get('fifty_two_week_low','N/A')} - ${stock_data.get('fifty_two_week_high','N/A')}
+Current Price: {stock_data.get('current_price', 'N/A')} ({stock_data.get('price_change_pct', 0):+.2f}% today)
+Market Cap: {currency} {(stock_data.get('market_cap') or 0)/1e9:.2f}B (Values in {currency})
+52-Week Range: {stock_data.get('fifty_two_week_low','N/A')} - {stock_data.get('fifty_two_week_high','N/A')}
 
 Price Trend: {analysis_data.get('price_trend', 'N/A')}
 Volatility: {analysis_data.get('volatility_level', 'N/A')}
